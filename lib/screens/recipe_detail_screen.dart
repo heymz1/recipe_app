@@ -7,282 +7,182 @@ import 'recipe_form_screen.dart';
 class RecipeDetailScreen extends StatefulWidget {
   final Recipe recipe;
 
-  const RecipeDetailScreen({
-    super.key,
-    required this.recipe,
-  });
+  RecipeDetailScreen({required this.recipe});
 
   @override
-  State<RecipeDetailScreen> createState() => _RecipeDetailScreenState();
+  _RecipeDetailScreenState createState() => _RecipeDetailScreenState();
 }
 
 class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
-  late Recipe _recipe;
+  late Recipe recipe;
 
   @override
   void initState() {
     super.initState();
-    _recipe = widget.recipe;
+    recipe = widget.recipe;
   }
 
-  Future<void> _editRecipe() async {
-    final types = await RecipeService.loadRecipeTypes();
-    
-    if (!mounted) return;
-    
-    final result = await Navigator.push(
+  void editRecipe() async {
+    var types = await RecipeService.getTypes();
+
+    var result = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => RecipeFormScreen(
-          recipeTypes: types,
-          recipe: _recipe,
-        ),
+        builder: (context) => RecipeFormScreen(types: types, recipe: recipe),
       ),
     );
-    
-    // Refresh the recipe data if it was edited
+
     if (result == true) {
-      final updatedRecipe = RecipeService.getRecipeById(_recipe.id);
-      if (updatedRecipe != null && mounted) {
-        setState(() {
-          _recipe = updatedRecipe;
-        });
+      // reload recipe
+      var updated = await RecipeService.getById(recipe.id);
+      if (updated != null) {
+        setState(() => recipe = updated);
       }
     }
   }
 
-  Future<void> _deleteRecipe() async {
-    final confirmed = await showDialog<bool>(
+  void deleteRecipe() async {
+    var confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Recipe'),
-        content: Text('Are you sure you want to delete "${_recipe.name}"?'),
+        title: Text('Delete Recipe'),
+        content: Text('Delete "${recipe.name}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
-            ),
-            child: const Text('Delete'),
+            child: Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
-    
-    if (confirmed == true) {
-      await RecipeService.deleteRecipe(_recipe.id);
-      if (mounted) {
-        Navigator.pop(context, true); // Return true to indicate deletion
-      }
+
+    if (confirm == true) {
+      await RecipeService.delete(recipe.id);
+      Navigator.pop(context, true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    var ingredients = recipe.getIngredientsList();
+    var steps = recipe.getStepsList();
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(_recipe.name),
-        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-        foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+        title: Text(recipe.name),
+        backgroundColor: Colors.orange[100],
         actions: [
-          IconButton(
-            icon: const Icon(Icons.edit),
-            onPressed: _editRecipe,
-            tooltip: 'Edit Recipe',
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete),
-            onPressed: _deleteRecipe,
-            tooltip: 'Delete Recipe',
-          ),
+          IconButton(icon: Icon(Icons.edit), onPressed: editRecipe),
+          IconButton(icon: Icon(Icons.delete), onPressed: deleteRecipe),
         ],
       ),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Recipe Image
-            if (_recipe.imagePath != null && _recipe.imagePath!.isNotEmpty)
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Image.file(
-                  File(_recipe.imagePath!),
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return _buildPlaceholder();
-                  },
-                ),
+            // image
+            if (recipe.imgPath != null && recipe.imgPath!.isNotEmpty)
+              Image.file(
+                File(recipe.imgPath!),
+                height: 250,
+                width: double.infinity,
+                fit: BoxFit.cover,
               )
             else
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: _buildPlaceholder(),
+              Container(
+                height: 250,
+                color: Colors.grey[300],
+                child: Center(
+                  child: Icon(
+                    Icons.restaurant_menu,
+                    size: 80,
+                    color: Colors.grey[600],
+                  ),
+                ),
               ),
-            
+
             Padding(
-              padding: const EdgeInsets.all(16.0),
+              padding: EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Recipe Type Badge
+                  // type badge
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
+                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(16),
+                      color: Colors.orange[100],
+                      borderRadius: BorderRadius.circular(15),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.restaurant,
-                          size: 16,
-                          color:
-                              Theme.of(context).colorScheme.onPrimaryContainer,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _recipe.recipeTypeName,
-                          style: TextStyle(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onPrimaryContainer,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      recipe.typeName,
+                      style: TextStyle(color: Colors.orange[900]),
                     ),
                   ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Ingredients Section
+
+                  SizedBox(height: 20),
+
+                  // ingredients
                   Text(
                     'Ingredients',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 12),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: _recipe.ingredients.asMap().entries.map((entry) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4.0),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  Icons.check_circle,
-                                  size: 20,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    entry.value,
-                                    style:
-                                        Theme.of(context).textTheme.bodyLarge,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
+                  SizedBox(height: 10),
+                  ...ingredients.map(
+                    (ing) => Padding(
+                      padding: EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            size: 18,
+                            color: Colors.green,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(child: Text(ing)),
+                        ],
                       ),
                     ),
                   ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Steps Section
+
+                  SizedBox(height: 20),
+
+                  // steps
                   Text(
                     'Instructions',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 12),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
+                  SizedBox(height: 10),
+                  ...steps.asMap().entries.map(
+                    (e) => Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: _recipe.steps.asMap().entries.map((entry) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8.0),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  width: 28,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primaryContainer,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      '${entry.key + 1}',
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onPrimaryContainer,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(top: 4.0),
-                                    child: Text(
-                                      entry.value,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyLarge,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                        children: [
+                          CircleAvatar(
+                            radius: 12,
+                            backgroundColor: Colors.orange,
+                            child: Text(
+                              '${e.key + 1}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.white,
+                              ),
                             ),
-                          );
-                        }).toList(),
+                          ),
+                          SizedBox(width: 10),
+                          Expanded(child: Text(e.value)),
+                        ],
                       ),
                     ),
                   ),
-                  
-                  const SizedBox(height: 32),
                 ],
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPlaceholder() {
-    return Container(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Center(
-        child: Icon(
-          Icons.restaurant_menu,
-          size: 80,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),
     );

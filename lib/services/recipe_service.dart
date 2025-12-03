@@ -1,228 +1,330 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
-import 'package:hive/hive.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:path/path.dart';
 import '../models/recipe_model.dart';
 import '../models/recipe_type_model.dart';
 
+// Service for handling all recipe operations with SQLite
 class RecipeService {
-  static const String _recipeBoxName = 'recipes';
-  static Box<Recipe>? _recipeBox;
+  static Database? _db;
 
-  // Initialize Hive and open the box
-  static Future<void> initialize() async {
-    final appDocumentDir = await getApplicationDocumentsDirectory();
-    Hive.init(appDocumentDir.path);
-    
-    // Register adapter
-    if (!Hive.isAdapterRegistered(0)) {
-      Hive.registerAdapter(RecipeAdapter());
+  // init database
+  static Future<void> init() async {
+    // Initialize FFI for desktop platforms
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
     }
-    
-    // Open box
-    _recipeBox = await Hive.openBox<Recipe>(_recipeBoxName);
-    
-    // Pre-populate with sample data if box is empty
-    if (_recipeBox!.isEmpty) {
-      await _populateSampleRecipes();
+
+    var dbPath = await getDatabasesPath();
+    String path = join(dbPath, 'recipes.db');
+
+    _db = await openDatabase(
+      path,
+      version: 1,
+      onCreate: (db, version) async {
+        // create recipes table
+        await db.execute('''
+          CREATE TABLE recipes (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            typeId INTEGER NOT NULL,
+            typeName TEXT NOT NULL,
+            imgPath TEXT,
+            ingredients TEXT NOT NULL,
+            steps TEXT NOT NULL,
+            createdAt INTEGER NOT NULL
+          )
+        ''');
+      },
+    );
+
+    // add sample data if empty
+    var count = await _db!.rawQuery('SELECT COUNT(*) as count FROM recipes');
+    if (count[0]['count'] == 0) {
+      await addSampleData();
+    } else {
+      // Migration: add images to existing sample recipes
+      await _migrateExistingRecipes();
     }
   }
 
-  // Get the recipe box
-  static Box<Recipe> get recipeBox {
-    if (_recipeBox == null || !_recipeBox!.isOpen) {
-      throw Exception('Recipe box is not initialized. Call initialize() first.');
-    }
-    return _recipeBox!;
+  static Database get db => _db!;
+
+  // load types from json file
+  static Future<List<RecipeType>> getTypes() async {
+    var jsonString = await rootBundle.loadString('assets/recipetypes.json');
+    return RecipeType.parseJson(jsonString);
   }
 
-  // Load recipe types from JSON
-  static Future<List<RecipeType>> loadRecipeTypes() async {
-    try {
-      final jsonString = await rootBundle.loadString('assets/recipetypes.json');
-      return RecipeType.listFromJson(jsonString);
-    } catch (e) {
-      throw Exception('Failed to load recipe types: $e');
-    }
+  // CRUD operations
+  static Future<void> addRecipe(Recipe r) async {
+    await db.insert('recipes', r.toMap());
   }
 
-  // Create a new recipe
-  static Future<void> createRecipe(Recipe recipe) async {
-    await recipeBox.put(recipe.id, recipe);
+  static Future<List<Recipe>> getAll() async {
+    var maps = await db.query('recipes', orderBy: 'createdAt DESC');
+    return maps.map((m) => Recipe.fromMap(m)).toList();
   }
 
-  // Get all recipes
-  static List<Recipe> getAllRecipes() {
-    return recipeBox.values.toList();
+  static Future<Recipe?> getById(String id) async {
+    var maps = await db.query('recipes', where: 'id = ?', whereArgs: [id]);
+    if (maps.isEmpty) return null;
+    return Recipe.fromMap(maps.first);
   }
 
-  // Get recipe by ID
-  static Recipe? getRecipeById(String id) {
-    return recipeBox.get(id);
+  static Future<void> update(Recipe r) async {
+    await db.update('recipes', r.toMap(), where: 'id = ?', whereArgs: [r.id]);
   }
 
-  // Update recipe
-  static Future<void> updateRecipe(Recipe recipe) async {
-    await recipeBox.put(recipe.id, recipe);
-  }
-
-  // Delete recipe
-  static Future<void> deleteRecipe(String id) async {
-    // Delete associated image file if exists
-    final recipe = recipeBox.get(id);
-    if (recipe?.imagePath != null && recipe!.imagePath!.isNotEmpty) {
+  static Future<void> delete(String id) async {
+    // get recipe first to delete image
+    var recipe = await getById(id);
+    if (recipe?.imgPath != null && recipe!.imgPath!.isNotEmpty) {
       try {
-        final imageFile = File(recipe.imagePath!);
-        if (await imageFile.exists()) {
-          await imageFile.delete();
+        var file = File(recipe.imgPath!);
+        if (await file.exists()) {
+          await file.delete();
         }
       } catch (e) {
-        // Continue with deletion even if image deletion fails
+        // ignore
       }
     }
-    await recipeBox.delete(id);
+    await db.delete('recipes', where: 'id = ?', whereArgs: [id]);
   }
 
-  // Filter recipes by type
-  static List<Recipe> getRecipesByType(int typeId) {
-    return recipeBox.values.where((recipe) => recipe.recipeTypeId == typeId).toList();
+  // filter by type
+  static Future<List<Recipe>> filterByType(int typeId) async {
+    var maps = await db.query(
+      'recipes',
+      where: 'typeId = ?',
+      whereArgs: [typeId],
+      orderBy: 'createdAt DESC',
+    );
+    return maps.map((m) => Recipe.fromMap(m)).toList();
   }
 
-  // Pre-populate sample recipes
-  static Future<void> _populateSampleRecipes() async {
-    final sampleRecipes = [
+  // add some sample recipes
+  static Future<void> addSampleData() async {
+    // Get the application documents directory for storing images
+    var appDir = await getDatabasesPath();
+    var imagesDir = join(appDir, 'recipe_images');
+
+    // Create images directory if it doesn't exist
+    var dir = Directory(imagesDir);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+
+    var samples = [
       Recipe(
         id: '1',
-        name: 'Classic Pancakes',
-        recipeTypeId: 1,
-        recipeTypeName: 'Breakfast',
-        ingredients: [
-          '1 cup all-purpose flour',
-          '2 tablespoons sugar',
-          '2 teaspoons baking powder',
-          '1/2 teaspoon salt',
+        name: 'Pancakes',
+        typeId: 1,
+        typeName: 'Breakfast',
+        imgPath: null,
+        ingredients: Recipe.joinList([
+          '1 cup flour',
+          '2 tbsp sugar',
+          '2 tsp baking powder',
+          '1/2 tsp salt',
           '1 cup milk',
           '1 egg',
-          '2 tablespoons melted butter',
-        ],
-        steps: [
-          'Mix dry ingredients in a bowl',
-          'Whisk together milk, egg, and melted butter',
-          'Combine wet and dry ingredients',
-          'Heat a griddle over medium heat',
-          'Pour 1/4 cup batter for each pancake',
-          'Cook until bubbles form, then flip',
-          'Cook until golden brown on both sides',
-        ],
+          '2 tbsp butter',
+        ]),
+        steps: Recipe.joinList([
+          'Mix dry ingredients',
+          'Mix wet ingredients',
+          'Combine everything',
+          'Heat pan',
+          'Pour batter',
+          'Flip when bubbles form',
+          'Cook until golden',
+        ]),
         createdAt: DateTime.now(),
       ),
       Recipe(
         id: '2',
         name: 'Caesar Salad',
-        recipeTypeId: 2,
-        recipeTypeName: 'Lunch',
-        ingredients: [
-          '1 head romaine lettuce',
-          '1/2 cup Caesar dressing',
-          '1/2 cup croutons',
-          '1/4 cup parmesan cheese',
-          '2 grilled chicken breasts (optional)',
-        ],
-        steps: [
-          'Wash and chop romaine lettuce',
-          'Slice grilled chicken if using',
-          'Place lettuce in a large bowl',
-          'Add Caesar dressing and toss well',
-          'Top with croutons and parmesan cheese',
-          'Add chicken if desired',
-          'Serve immediately',
-        ],
+        typeId: 2,
+        typeName: 'Lunch',
+        imgPath: null, // User can add image later
+        ingredients: Recipe.joinList([
+          'Romaine lettuce',
+          'Caesar dressing',
+          'Croutons',
+          'Parmesan',
+          'Chicken (optional)',
+        ]),
+        steps: Recipe.joinList([
+          'Wash lettuce',
+          'Chop lettuce',
+          'Add dressing',
+          'Add croutons',
+          'Add cheese',
+          'Toss and serve',
+        ]),
         createdAt: DateTime.now(),
       ),
       Recipe(
         id: '3',
         name: 'Spaghetti Carbonara',
-        recipeTypeId: 3,
-        recipeTypeName: 'Dinner',
-        ingredients: [
+        typeId: 3,
+        typeName: 'Dinner',
+        imgPath: null, // User can add image later
+        ingredients: Recipe.joinList([
           '400g spaghetti',
-          '200g bacon or pancetta',
+          '200g bacon',
           '4 eggs',
-          '100g parmesan cheese',
+          '100g parmesan',
           'Black pepper',
           'Salt',
-        ],
-        steps: [
-          'Cook spaghetti according to package directions',
-          'Fry bacon until crispy, then chop',
-          'Beat eggs and mix with parmesan cheese',
-          'Drain pasta, reserving 1 cup pasta water',
-          'Add hot pasta to bacon',
-          'Remove from heat and quickly stir in egg mixture',
-          'Add pasta water to reach desired consistency',
-          'Season with black pepper and serve',
-        ],
+        ]),
+        steps: Recipe.joinList([
+          'Cook pasta',
+          'Fry bacon',
+          'Beat eggs with cheese',
+          'Drain pasta',
+          'Mix pasta with bacon',
+          'Add egg mixture off heat',
+          'Add pasta water if needed',
+          'Serve with pepper',
+        ]),
         createdAt: DateTime.now(),
       ),
       Recipe(
         id: '4',
-        name: 'Chocolate Chip Cookies',
-        recipeTypeId: 4,
-        recipeTypeName: 'Dessert',
-        ingredients: [
-          '2 1/4 cups all-purpose flour',
+        name: 'Chocolate Cookies',
+        typeId: 4,
+        typeName: 'Dessert',
+        imgPath: await _copyAssetToLocal(
+          'assets/images/recipes/chocolate_cookies.png',
+          imagesDir,
+          'chocolate_cookies.png',
+        ),
+        ingredients: Recipe.joinList([
+          '2 cups flour',
           '1 tsp baking soda',
-          '1 cup butter, softened',
+          '1 cup butter',
           '3/4 cup sugar',
           '3/4 cup brown sugar',
           '2 eggs',
-          '2 tsp vanilla extract',
+          '2 tsp vanilla',
           '2 cups chocolate chips',
-        ],
-        steps: [
-          'Preheat oven to 375°F (190°C)',
+        ]),
+        steps: Recipe.joinList([
+          'Preheat oven to 375F',
           'Mix flour and baking soda',
-          'Cream together butter and sugars',
-          'Beat in eggs and vanilla',
-          'Gradually blend in flour mixture',
-          'Stir in chocolate chips',
-          'Drop rounded tablespoons onto baking sheets',
-          'Bake for 9-11 minutes until golden brown',
-        ],
+          'Cream butter and sugars',
+          'Add eggs and vanilla',
+          'Mix in flour',
+          'Add chocolate chips',
+          'Drop on baking sheet',
+          'Bake 9-11 minutes',
+        ]),
         createdAt: DateTime.now(),
       ),
       Recipe(
         id: '5',
-        name: 'Fresh Fruit Smoothie',
-        recipeTypeId: 6,
-        recipeTypeName: 'Beverage',
-        ingredients: [
+        name: 'Fruit Smoothie',
+        typeId: 6,
+        typeName: 'Beverage',
+        imgPath: await _copyAssetToLocal(
+          'assets/images/recipes/fruit_smoothie.png',
+          imagesDir,
+          'fruit_smoothie.png',
+        ),
+        ingredients: Recipe.joinList([
           '1 banana',
           '1 cup strawberries',
           '1/2 cup blueberries',
           '1 cup yogurt',
           '1/2 cup orange juice',
-          '1 tablespoon honey',
-          'Ice cubes',
-        ],
-        steps: [
-          'Add all fruits to blender',
-          'Add yogurt and orange juice',
-          'Add honey and ice cubes',
+          '1 tbsp honey',
+        ]),
+        steps: Recipe.joinList([
+          'Add fruits to blender',
+          'Add yogurt and juice',
+          'Add honey',
           'Blend until smooth',
-          'Pour into glasses and serve immediately',
-        ],
+          'Serve immediately',
+        ]),
         createdAt: DateTime.now(),
       ),
     ];
 
-    for (final recipe in sampleRecipes) {
-      await createRecipe(recipe);
+    for (var r in samples) {
+      await addRecipe(r);
     }
   }
 
-  // Close the box (call when app is closed)
-  static Future<void> close() async {
-    await _recipeBox?.close();
+  // Migration method to add images to existing recipes
+  static Future<void> _migrateExistingRecipes() async {
+    try {
+      var appDir = await getDatabasesPath();
+      var imagesDir = join(appDir, 'recipe_images');
+
+      // Create images directory if it doesn't exist
+      var dir = Directory(imagesDir);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+
+      // Update recipe 4 (Chocolate Cookies)
+      var recipe4 = await getById('4');
+      if (recipe4 != null &&
+          (recipe4.imgPath == null || recipe4.imgPath!.isEmpty)) {
+        var imgPath = await _copyAssetToLocal(
+          'assets/images/recipes/chocolate_cookies.png',
+          imagesDir,
+          'chocolate_cookies.png',
+        );
+        if (imgPath != null) {
+          recipe4.imgPath = imgPath;
+          await update(recipe4);
+        }
+      }
+
+      // Update recipe 5 (Fruit Smoothie)
+      var recipe5 = await getById('5');
+      if (recipe5 != null &&
+          (recipe5.imgPath == null || recipe5.imgPath!.isEmpty)) {
+        var imgPath = await _copyAssetToLocal(
+          'assets/images/recipes/fruit_smoothie.png',
+          imagesDir,
+          'fruit_smoothie.png',
+        );
+        if (imgPath != null) {
+          recipe5.imgPath = imgPath;
+          await update(recipe5);
+        }
+      }
+    } catch (e) {
+      // Silently fail if migration has issues
+      print('Migration error: $e');
+    }
+  }
+
+  // Helper method to copy asset image to local directory
+  static Future<String?> _copyAssetToLocal(
+    String assetPath,
+    String targetDir,
+    String filename,
+  ) async {
+    try {
+      final ByteData data = await rootBundle.load(assetPath);
+      final List<int> bytes = data.buffer.asUint8List();
+
+      final String path = join(targetDir, filename);
+      final File file = File(path);
+      await file.writeAsBytes(bytes);
+
+      return path;
+    } catch (e) {
+      // If asset doesn't exist, return null
+      return null;
+    }
   }
 }

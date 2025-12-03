@@ -7,430 +7,341 @@ import '../models/recipe_type_model.dart';
 import '../services/recipe_service.dart';
 
 class RecipeFormScreen extends StatefulWidget {
-  final List<RecipeType> recipeTypes;
-  final Recipe? recipe; // null for creating new recipe
+  final List<RecipeType> types;
+  final Recipe? recipe;
 
-  const RecipeFormScreen({
-    super.key,
-    required this.recipeTypes,
-    this.recipe,
-  });
+  RecipeFormScreen({required this.types, this.recipe});
 
   @override
-  State<RecipeFormScreen> createState() => _RecipeFormScreenState();
+  _RecipeFormScreenState createState() => _RecipeFormScreenState();
 }
 
 class _RecipeFormScreenState extends State<RecipeFormScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  
-  RecipeType? _selectedType;
-  String? _imagePath;
-  final List<TextEditingController> _ingredientControllers = [];
-  final List<TextEditingController> _stepControllers = [];
-  
-  bool _isLoading = false;
-  final ImagePicker _picker = ImagePicker();
+  var nameController = TextEditingController();
+  RecipeType? selectedType;
+  String? imagePath;
+  List<TextEditingController> ingredientControllers = [];
+  List<TextEditingController> stepControllers = [];
+  bool saving = false;
 
   @override
   void initState() {
     super.initState();
-    
+
     if (widget.recipe != null) {
-      // Editing existing recipe
-      _nameController.text = widget.recipe!.name;
-      _selectedType = widget.recipeTypes.firstWhere(
-        (type) => type.id == widget.recipe!.recipeTypeId,
-        orElse: () => widget.recipeTypes.first,
+      // editing mode
+      nameController.text = widget.recipe!.name;
+      selectedType = widget.types.firstWhere(
+        (t) => t.id == widget.recipe!.typeId,
       );
-      _imagePath = widget.recipe!.imagePath;
-      
-      // Load ingredients
-      for (final ingredient in widget.recipe!.ingredients) {
-        final controller = TextEditingController(text: ingredient);
-        _ingredientControllers.add(controller);
+      imagePath = widget.recipe!.imgPath;
+
+      // load ingredients from string
+      var ings = widget.recipe!.getIngredientsList();
+      for (var ing in ings) {
+        ingredientControllers.add(TextEditingController(text: ing));
       }
-      
-      // Load steps
-      for (final step in widget.recipe!.steps) {
-        final controller = TextEditingController(text: step);
-        _stepControllers.add(controller);
+
+      // load steps from string
+      var stps = widget.recipe!.getStepsList();
+      for (var step in stps) {
+        stepControllers.add(TextEditingController(text: step));
       }
     } else {
-      // Creating new recipe - add one empty field for each
-      _addIngredientField();
-      _addStepField();
+      // new recipe
+      addIngredient();
+      addStep();
     }
   }
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    for (final controller in _ingredientControllers) {
-      controller.dispose();
-    }
-    for (final controller in _stepControllers) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  void _addIngredientField() {
+  void addIngredient() {
     setState(() {
-      _ingredientControllers.add(TextEditingController());
+      ingredientControllers.add(TextEditingController());
     });
   }
 
-  void _removeIngredientField(int index) {
-    if (_ingredientControllers.length > 1) {
+  void removeIngredient(int index) {
+    if (ingredientControllers.length > 1) {
       setState(() {
-        _ingredientControllers[index].dispose();
-        _ingredientControllers.removeAt(index);
+        ingredientControllers[index].dispose();
+        ingredientControllers.removeAt(index);
       });
     }
   }
 
-  void _addStepField() {
+  void addStep() {
     setState(() {
-      _stepControllers.add(TextEditingController());
+      stepControllers.add(TextEditingController());
     });
   }
 
-  void _removeStepField(int index) {
-    if (_stepControllers.length > 1) {
+  void removeStep(int index) {
+    if (stepControllers.length > 1) {
       setState(() {
-        _stepControllers[index].dispose();
-        _stepControllers.removeAt(index);
+        stepControllers[index].dispose();
+        stepControllers.removeAt(index);
       });
     }
   }
 
-  Future<void> _pickImage() async {
-    try {
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
-      );
-      
-      if (image != null) {
-        // Save image to app directory
-        final appDir = await getApplicationDocumentsDirectory();
-        final fileName = 'recipe_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final savedImage = File('${appDir.path}/$fileName');
-        await image.saveTo(savedImage.path);
-        
-        setState(() {
-          _imagePath = savedImage.path;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking image: $e')),
-        );
-      }
+  void pickImage() async {
+    final picker = ImagePicker();
+    var image = await picker.pickImage(source: ImageSource.gallery);
+
+    if (image != null) {
+      var dir = await getApplicationDocumentsDirectory();
+      var filename = 'recipe_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      var savedPath = '${dir.path}/$filename';
+      await File(image.path).copy(savedPath);
+
+      setState(() => imagePath = savedPath);
     }
   }
 
-  Future<void> _saveRecipe() async {
-    if (!_formKey.currentState!.validate()) {
+  void saveRecipe() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    if (selectedType == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Please select recipe type')));
       return;
     }
-    
-    if (_selectedType == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a recipe type')),
-      );
-      return;
-    }
-    
-    // Get non-empty ingredients and steps
-    final ingredients = _ingredientControllers
+
+    var ingredients = ingredientControllers
         .map((c) => c.text.trim())
-        .where((text) => text.isNotEmpty)
+        .where((t) => t.isNotEmpty)
         .toList();
-    
-    final steps = _stepControllers
+
+    var steps = stepControllers
         .map((c) => c.text.trim())
-        .where((text) => text.isNotEmpty)
+        .where((t) => t.isNotEmpty)
         .toList();
-    
+
     if (ingredients.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add at least one ingredient')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add at least one ingredient')));
       return;
     }
-    
+
     if (steps.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add at least one step')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add at least one step')));
       return;
     }
-    
-    setState(() => _isLoading = true);
-    
-    try {
-      final recipe = Recipe(
-        id: widget.recipe?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        name: _nameController.text.trim(),
-        recipeTypeId: _selectedType!.id,
-        recipeTypeName: _selectedType!.name,
-        imagePath: _imagePath,
-        ingredients: ingredients,
-        steps: steps,
-        createdAt: widget.recipe?.createdAt ?? DateTime.now(),
-      );
-      
-      if (widget.recipe != null) {
-        await RecipeService.updateRecipe(recipe);
-      } else {
-        await RecipeService.createRecipe(recipe);
-      }
-      
-      if (mounted) {
-        Navigator.pop(context, true); // Return true to indicate success
-      }
-    } catch (e) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving recipe: $e')),
-        );
-      }
+
+    setState(() => saving = true);
+
+    var recipe = Recipe(
+      id: widget.recipe?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      name: nameController.text.trim(),
+      typeId: selectedType!.id,
+      typeName: selectedType!.name,
+      imgPath: imagePath,
+      ingredients: Recipe.joinList(ingredients),
+      steps: Recipe.joinList(steps),
+      createdAt: widget.recipe?.createdAt ?? DateTime.now(),
+    );
+
+    if (widget.recipe != null) {
+      await RecipeService.update(recipe);
+    } else {
+      await RecipeService.addRecipe(recipe);
     }
+
+    Navigator.pop(context, true);
   }
 
   @override
   Widget build(BuildContext context) {
-    final isEditing = widget.recipe != null;
-    
+    bool isEdit = widget.recipe != null;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(isEditing ? 'Edit Recipe' : 'New Recipe'),
-        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-        foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+        title: Text(isEdit ? 'Edit Recipe' : 'New Recipe'),
+        backgroundColor: Colors.orange[100],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+      body: saving
+          ? Center(child: CircularProgressIndicator())
           : Form(
               key: _formKey,
               child: ListView(
-                padding: const EdgeInsets.all(16.0),
+                padding: EdgeInsets.all(16),
                 children: [
-                  // Recipe Name
                   TextFormField(
-                    controller: _nameController,
-                    decoration: const InputDecoration(
+                    controller: nameController,
+                    decoration: InputDecoration(
                       labelText: 'Recipe Name',
-                      hintText: 'Enter recipe name',
-                      prefixIcon: Icon(Icons.restaurant_menu),
+                      border: OutlineInputBorder(),
                     ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Please enter a recipe name';
-                      }
-                      return null;
-                    },
+                    validator: (v) => v!.isEmpty ? 'Enter name' : null,
                   ),
-                  
-                  const SizedBox(height: 16),
-                  
-                  // Recipe Type Dropdown
+
+                  SizedBox(height: 15),
+
                   DropdownButtonFormField<RecipeType>(
-                    value: _selectedType,
-                    decoration: const InputDecoration(
-                      labelText: 'Recipe Type',
-                      prefixIcon: Icon(Icons.category),
+                    value: selectedType,
+                    decoration: InputDecoration(
+                      labelText: 'Type',
+                      border: OutlineInputBorder(),
                     ),
-                    items: widget.recipeTypes.map((type) {
-                      return DropdownMenuItem<RecipeType>(
-                        value: type,
-                        child: Text(type.name),
-                      );
-                    }).toList(),
-                    onChanged: (RecipeType? value) {
-                      setState(() {
-                        _selectedType = value;
-                      });
-                    },
-                    validator: (value) {
-                      if (value == null) {
-                        return 'Please select a recipe type';
-                      }
-                      return null;
-                    },
+                    items: widget.types
+                        .map(
+                          (t) =>
+                              DropdownMenuItem(value: t, child: Text(t.name)),
+                        )
+                        .toList(),
+                    onChanged: (val) => setState(() => selectedType = val),
                   ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Image Section
+
+                  SizedBox(height: 20),
+
                   Text(
-                    'Recipe Image',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                    'Image',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 12),
-                  
-                  if (_imagePath != null && _imagePath!.isNotEmpty)
+                  SizedBox(height: 10),
+
+                  if (imagePath != null)
                     Stack(
                       children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: AspectRatio(
-                            aspectRatio: 16 / 9,
-                            child: Image.file(
-                              File(_imagePath!),
-                              fit: BoxFit.cover,
-                            ),
-                          ),
+                        Image.file(
+                          File(imagePath!),
+                          height: 200,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
                         ),
                         Positioned(
-                          top: 8,
-                          right: 8,
+                          top: 5,
+                          right: 5,
                           child: IconButton(
-                            icon: const Icon(Icons.close),
+                            icon: Icon(Icons.close, color: Colors.white),
                             style: IconButton.styleFrom(
                               backgroundColor: Colors.black54,
-                              foregroundColor: Colors.white,
                             ),
-                            onPressed: () {
-                              setState(() {
-                                _imagePath = null;
-                              });
-                            },
+                            onPressed: () => setState(() => imagePath = null),
                           ),
                         ),
                       ],
                     ),
-                  
-                  OutlinedButton.icon(
-                    onPressed: _pickImage,
-                    icon: const Icon(Icons.add_photo_alternate),
-                    label: Text(_imagePath != null ? 'Change Image' : 'Add Image'),
+
+                  ElevatedButton.icon(
+                    onPressed: pickImage,
+                    icon: Icon(Icons.photo),
+                    label: Text(
+                      imagePath != null ? 'Change Image' : 'Add Image',
+                    ),
                   ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Ingredients Section
+
+                  SizedBox(height: 20),
+
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
                         'Ingredients',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                      IconButton.filled(
-                        onPressed: _addIngredientField,
-                        icon: const Icon(Icons.add),
-                        tooltip: 'Add Ingredient',
+                      IconButton(
+                        icon: Icon(Icons.add_circle, color: Colors.orange),
+                        onPressed: addIngredient,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  
-                  ..._ingredientControllers.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final controller = entry.value;
-                    
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12.0),
+
+                  ...ingredientControllers.asMap().entries.map(
+                    (e) => Padding(
+                      padding: EdgeInsets.only(bottom: 10),
                       child: Row(
                         children: [
                           Expanded(
-                            child: TextFormField(
-                              controller: controller,
+                            child: TextField(
+                              controller: e.value,
                               decoration: InputDecoration(
-                                labelText: 'Ingredient ${index + 1}',
-                                hintText: 'e.g., 2 cups flour',
-                                prefixIcon: const Icon(Icons.shopping_basket),
+                                labelText: 'Ingredient ${e.key + 1}',
+                                border: OutlineInputBorder(),
                               ),
                             ),
                           ),
-                          if (_ingredientControllers.length > 1)
+                          if (ingredientControllers.length > 1)
                             IconButton(
-                              icon: const Icon(Icons.remove_circle_outline),
-                              color: Theme.of(context).colorScheme.error,
-                              onPressed: () => _removeIngredientField(index),
+                              icon: Icon(
+                                Icons.remove_circle,
+                                color: Colors.red,
+                              ),
+                              onPressed: () => removeIngredient(e.key),
                             ),
                         ],
                       ),
-                    );
-                  }),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Steps Section
+                    ),
+                  ),
+
+                  SizedBox(height: 20),
+
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Instructions',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        'Steps',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                      IconButton.filled(
-                        onPressed: _addStepField,
-                        icon: const Icon(Icons.add),
-                        tooltip: 'Add Step',
+                      IconButton(
+                        icon: Icon(Icons.add_circle, color: Colors.orange),
+                        onPressed: addStep,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  
-                  ..._stepControllers.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final controller = entry.value;
-                    
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12.0),
+
+                  ...stepControllers.asMap().entries.map(
+                    (e) => Padding(
+                      padding: EdgeInsets.only(bottom: 10),
                       child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
-                            child: TextFormField(
-                              controller: controller,
+                            child: TextField(
+                              controller: e.value,
                               decoration: InputDecoration(
-                                labelText: 'Step ${index + 1}',
-                                hintText: 'Describe this step',
-                                prefixIcon: const Icon(Icons.format_list_numbered),
-                                alignLabelWithHint: true,
+                                labelText: 'Step ${e.key + 1}',
+                                border: OutlineInputBorder(),
                               ),
-                              maxLines: 3,
-                              minLines: 1,
+                              maxLines: 2,
                             ),
                           ),
-                          if (_stepControllers.length > 1)
+                          if (stepControllers.length > 1)
                             IconButton(
-                              icon: const Icon(Icons.remove_circle_outline),
-                              color: Theme.of(context).colorScheme.error,
-                              onPressed: () => _removeStepField(index),
+                              icon: Icon(
+                                Icons.remove_circle,
+                                color: Colors.red,
+                              ),
+                              onPressed: () => removeStep(e.key),
                             ),
                         ],
                       ),
-                    );
-                  }),
-                  
-                  const SizedBox(height: 32),
-                  
-                  // Save Button
-                  FilledButton.icon(
-                    onPressed: _saveRecipe,
-                    icon: const Icon(Icons.save),
-                    label: Text(isEditing ? 'Update Recipe' : 'Save Recipe'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.all(16),
                     ),
                   ),
-                  
-                  const SizedBox(height: 16),
+
+                  SizedBox(height: 20),
+
+                  ElevatedButton(
+                    onPressed: saveRecipe,
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.all(15),
+                      backgroundColor: Colors.orange,
+                    ),
+                    child: Text(
+                      isEdit ? 'Update' : 'Save',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                  ),
                 ],
               ),
             ),

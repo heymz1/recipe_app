@@ -1,0 +1,10 @@
+^C:\USERS\MZ\DESKTOP\PROJECT\RECIPE_APP\BUILD\WINDOWS\X64\CMAKEFILES\12BF53F2C5A5C229A6AFDCDE7D5EEAD3\INSTALL_FORCE.RULE
+setlocal
+cd .
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

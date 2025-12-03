@@ -1,0 +1,15 @@
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/icudtl.dat
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/flutter_windows.dll
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/file_selector_windows_plugin.dll
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/AssetManifest.bin
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/AssetManifest.json
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/assets/images/recipes/chocolate_cookies.png
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/assets/images/recipes/fruit_smoothie.png
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/assets/recipetypes.json
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/FontManifest.json
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/fonts/MaterialIcons-Regular.otf
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/kernel_blob.bin
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/NativeAssetsManifest.json
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/NOTICES.Z
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/packages/cupertino_icons/assets/CupertinoIcons.ttf
+C:/Users/mz/Desktop/project/recipe_app/build/windows/x64/runner/Debug/data/flutter_assets/shaders/ink_sparkle.frag

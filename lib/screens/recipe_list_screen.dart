@@ -7,204 +7,170 @@ import 'recipe_detail_screen.dart';
 import 'recipe_form_screen.dart';
 
 class RecipeListScreen extends StatefulWidget {
-  const RecipeListScreen({super.key});
-
   @override
-  State<RecipeListScreen> createState() => _RecipeListScreenState();
+  _RecipeListScreenState createState() => _RecipeListScreenState();
 }
 
 class _RecipeListScreenState extends State<RecipeListScreen> {
-  List<Recipe> _recipes = [];
-  List<RecipeType> _recipeTypes = [];
-  RecipeType? _selectedType;
-  bool _isLoading = true;
+  List<Recipe> recipes = [];
+  List<RecipeType> types = [];
+  RecipeType? selectedType;
+  bool loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    loadData();
   }
 
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
-    
-    try {
-      final types = await RecipeService.loadRecipeTypes();
-      final recipes = RecipeService.getAllRecipes();
-      
-      setState(() {
-        _recipeTypes = types;
-        _recipes = recipes;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading data: $e')),
-        );
-      }
+  void loadData() async {
+    setState(() => loading = true);
+
+    var recipeTypes = await RecipeService.getTypes();
+    var allRecipes = await RecipeService.getAll(); // now async
+
+    setState(() {
+      types = recipeTypes;
+      recipes = allRecipes;
+      loading = false;
+    });
+  }
+
+  Future<List<Recipe>> getFilteredRecipes() async {
+    if (selectedType == null) {
+      return await RecipeService.getAll();
     }
+    return await RecipeService.filterByType(selectedType!.id);
   }
 
-  List<Recipe> _getFilteredRecipes() {
-    if (_selectedType == null) {
-      return _recipes;
-    }
-    return RecipeService.getRecipesByType(_selectedType!.id);
-  }
-
-  void _navigateToDetail(Recipe recipe) async {
-    final result = await Navigator.push(
+  void goToDetail(Recipe r) async {
+    var result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => RecipeDetailScreen(recipe: recipe),
-      ),
+      MaterialPageRoute(builder: (context) => RecipeDetailScreen(recipe: r)),
     );
-    
-    // Refresh list if recipe was modified or deleted
     if (result == true) {
-      _loadData();
+      loadData();
     }
   }
 
-  void _navigateToAddRecipe() async {
-    final result = await Navigator.push(
+  void goToAdd() async {
+    var result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => RecipeFormScreen(recipeTypes: _recipeTypes),
-      ),
+      MaterialPageRoute(builder: (context) => RecipeFormScreen(types: types)),
     );
-    
-    // Refresh list if a new recipe was added
     if (result == true) {
-      _loadData();
+      loadData();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final filteredRecipes = _getFilteredRecipes();
-    
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My Recipes'),
-        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-        foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+        title: Text('My Recipes'),
+        backgroundColor: Colors.orange[100],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+      body: loading
+          ? Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // Filter Section
+                // filter dropdown
                 Container(
-                  padding: const EdgeInsets.all(16.0),
-                  color: Theme.of(context).colorScheme.surface,
+                  padding: EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.filter_list,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 12),
+                      Icon(Icons.filter_list, color: Colors.orange),
+                      SizedBox(width: 12),
                       Expanded(
                         child: DropdownButtonFormField<RecipeType>(
-                          value: _selectedType,
-                          decoration: const InputDecoration(
+                          value: selectedType,
+                          decoration: InputDecoration(
                             labelText: 'Filter by Type',
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
+                            border: OutlineInputBorder(),
                           ),
-                          hint: const Text('All Recipes'),
                           items: [
-                            const DropdownMenuItem<RecipeType>(
-                              value: null,
-                              child: Text('All Recipes'),
+                            DropdownMenuItem(value: null, child: Text('All')),
+                            ...types.map(
+                              (t) => DropdownMenuItem(
+                                value: t,
+                                child: Text(t.name),
+                              ),
                             ),
-                            ..._recipeTypes.map((type) {
-                              return DropdownMenuItem<RecipeType>(
-                                value: type,
-                                child: Text(type.name),
-                              );
-                            }),
                           ],
-                          onChanged: (RecipeType? newValue) {
-                            setState(() {
-                              _selectedType = newValue;
-                            });
+                          onChanged: (val) {
+                            setState(() => selectedType = val);
                           },
                         ),
                       ),
                     ],
                   ),
                 ),
-                
-                // Recipe Grid
+
+                // recipe grid
                 Expanded(
-                  child: filteredRecipes.isEmpty
-                      ? Center(
+                  child: FutureBuilder<List<Recipe>>(
+                    future: getFilteredRecipes(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return Center(child: CircularProgressIndicator());
+                      }
+
+                      var filtered = snapshot.data!;
+
+                      if (filtered.isEmpty) {
+                        return Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
                                 Icons.restaurant_menu,
-                                size: 64,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
+                                size: 60,
+                                color: Colors.grey,
                               ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'No recipes found',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Tap the + button to add your first recipe',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
+                              SizedBox(height: 10),
+                              Text('No recipes found'),
                             ],
                           ),
-                        )
-                      : LayoutBuilder(
-                          builder: (context, constraints) {
-                            // Responsive grid columns
-                            int columns = 2;
-                            if (constraints.maxWidth > 900) {
-                              columns = 4;
-                            } else if (constraints.maxWidth > 600) {
-                              columns = 3;
-                            }
-                            
-                            return GridView.builder(
-                              padding: const EdgeInsets.all(16.0),
-                              gridDelegate:
-                                  SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: columns,
-                                childAspectRatio: 0.75,
-                                crossAxisSpacing: 16,
-                                mainAxisSpacing: 16,
-                              ),
-                              itemCount: filteredRecipes.length,
-                              itemBuilder: (context, index) {
-                                final recipe = filteredRecipes[index];
-                                return RecipeCardWidget(
-                                  recipe: recipe,
-                                  onTap: () => _navigateToDetail(recipe),
-                                );
-                              },
-                            );
-                          },
-                        ),
+                        );
+                      }
+
+                      return LayoutBuilder(
+                        builder: (context, constraints) {
+                          int cols = 2;
+                          if (constraints.maxWidth > 900) {
+                            cols = 4;
+                          } else if (constraints.maxWidth > 600) {
+                            cols = 3;
+                          }
+
+                          return GridView.builder(
+                            padding: EdgeInsets.all(16),
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: cols,
+                                  childAspectRatio: 0.75,
+                                  crossAxisSpacing: 12,
+                                  mainAxisSpacing: 12,
+                                ),
+                            itemCount: filtered.length,
+                            itemBuilder: (context, index) {
+                              return RecipeCard(
+                                recipe: filtered[index],
+                                onTap: () => goToDetail(filtered[index]),
+                              );
+                            },
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _navigateToAddRecipe,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Recipe'),
+      floatingActionButton: FloatingActionButton(
+        onPressed: goToAdd,
+        child: Icon(Icons.add),
+        backgroundColor: Colors.orange,
       ),
     );
   }
