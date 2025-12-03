@@ -5,6 +5,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
 import '../models/recipe_model.dart';
 import '../models/recipe_type_model.dart';
+import 'auth_service.dart';
 
 // Service for handling all recipe operations with SQLite
 class RecipeService {
@@ -49,6 +50,9 @@ class RecipeService {
       // Migration: add images to existing sample recipes
       await _migrateExistingRecipes();
     }
+
+    // Initialize authentication
+    await AuthService.initUsersTable();
   }
 
   static Database get db => _db!;

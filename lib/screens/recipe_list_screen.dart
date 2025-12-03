@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import '../models/recipe_model.dart';
 import '../models/recipe_type_model.dart';
 import '../services/recipe_service.dart';
+import '../services/auth_service.dart';
 import '../widgets/recipe_card_widget.dart';
 import 'recipe_detail_screen.dart';
 import 'recipe_form_screen.dart';
+import 'login_screen.dart';
 
 class RecipeListScreen extends StatefulWidget {
   @override
@@ -63,12 +65,48 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     }
   }
 
+  Future<void> handleLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Logout'),
+        content: Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Logout'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await AuthService.logout();
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => LoginScreen()),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text('My Recipes'),
         backgroundColor: Colors.orange[100],
+        actions: [
+          IconButton(
+            icon: Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: handleLogout,
+          ),
+        ],
       ),
       body: loading
           ? Center(child: CircularProgressIndicator())
